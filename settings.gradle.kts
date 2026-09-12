@@ -10,6 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // JitPack لازم برای SDK های ایرانی (Poolakey + myket-billing-client)
+        maven { url = uri("https://jitpack.io") }
     }
 }
 rootProject.name = "SegaSimulator"

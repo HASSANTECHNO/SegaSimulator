@@ -88,3 +88,56 @@ submodule)، هسته را واکشی کنید:
 - [ ] signaling سرور عمومی (فعلاً LAN/Direct-IP)
 - [ ] GamePad بلوتوثی، shader/فیلتر تصویر، rewind
 - [ ] support پیش‌فرض پورت 2 و حالت تماشاچی
+
+---
+
+## نسخه ۰.۳.۰ — پرداخت درون‌برنامه‌ای بازار و مایکت
+
+پرداخت گوگل‌پلی حذف شد؛ خرید فقط از **بازار** (Poolakey 2.2.0) یا **مایکت**
+(myket-billing-client 1.19) انجام می‌شود:
+
+```
+app/src/main/java/ir/segasim/billing/
+├── BillingProvider.kt        ← اینترفیس مشترک (connect / queryOwnedSkus / launchPurchase / disconnect)
+├── EntitlementRepository.kt  ← نقطه‌ی مرکزی «آیا کاربر خرید کرده؟» + کش محلی
+└── OfflineProvider.kt        ← نصب از فروشگاه دیگر / sideload
+
+app/src/bazaar/java/ir/segasim/billing/   ← BazaarProvider (Poolakey) + BillingFactory
+app/src/myket/java/ir/segasim/billing/    ← MyketProvider (IabHelper) + BillingFactory
+```
+
+### چرا دو طعم (Flavor)؟
+هر دو SDK کلاس AIDL `com.android.vending.billing.IInAppBillingService` را داخل
+خودشان باندل می‌کنند و کنار هم `Duplicate class` می‌دهند. به همین خاطر:
+
+- `assembleBazaarRelease` → APK نسخه‌ی بازار (فقط Poolakey)
+- `assembleMyketRelease` → APK نسخه‌ی مایکت (فقط myket-billing-client)
+
+انتخاب ارائه‌دهنده در زمان اجرا بر اساس `getInstallerPackageName` است؛ اگر اپ
+از فروشگاه دیگری نصب شده باشد، بدون کرش به حالت آفلاین می‌رود.
+
+### ریستور خرید پس از حذف و نصب مجدد
+محصول `unlock_all` غیرمصرفی (Non-Consumable) است و هرگز consume نمی‌شود. در هر
+راه‌اندازی، `EntitlementRepository.refreshFromStore()` موجودی واقعی را از سرور
+فروشگاه می‌پرسد، کش محلی (`SharedPreferences`) را به‌روز می‌کند و خرید قبلی
+به‌طور خودکار برمی‌گردد — حتی اگر کش پاک شده باشد.
+
+### قبل از انتشار عمومی
+1. در `BazaarProvider.kt` مقدار `BAZAAR_RSA_KEY` و در `MyketProvider.kt` مقدار
+   `MYKET_RSA_KEY` را با کلیدهای عمومی پنل‌ها جایگزین کنید (تا آن موقع
+   صحت‌سنجی محلی بازار به‌صورت خودکار خاموش است و لاگ هشدار می‌دهد).
+2. در پنل هر فروشگاه محصول `unlock_all` را از نوع غیرمصرفی بسازید.
+3. SHA-256 کلید امضا (`app/segasim-release.jks`) را در هر دو پنل ثبت کنید.
+
+### بیلد
+```bash
+git clone https://github.com/HASSANTECHNO/SegaSimulator.git
+cd SegaSimulator
+./gradlew assembleBazaarRelease assembleMyketRelease
+# خروجی: app/build/outputs/apk/{bazaar,myket}/**  (+ universal)
+```
+هر push روی `main` هم به‌طور خودکار با GitHub Actions بیلد و به‌صورت
+Artifact آپلود می‌شود (`.github/workflows/android-build.yml`).
+
+> ⚠️ کلید امضا برای راحتی بیلد داخل ریپو است؛ پیش از انتشار تجاری آن را
+> بچرخانید و مسیرش را از `app/build.gradle.kts` به بیرون از ریپو ببرید.

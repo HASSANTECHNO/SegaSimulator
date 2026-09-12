@@ -10,16 +10,37 @@ android {
 
     defaultConfig {
         applicationId = "ir.segasim"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
-        // ABIs از طریق splits.abi مدیریت می‌شوند (abiFilters با splits تداخل دارد)
+        // پلیس‌هولدرهای مانیفست کتابخانه‌ی مایکت — بدون این‌ها merge مانیفست شکست می‌خورد
+        manifestPlaceholders["marketApplicationId"] = "ir.mservices.market"
+        manifestPlaceholders["marketBindAddress"] = "ir.mservices.market.InAppBillingService.BIND"
+        manifestPlaceholders["marketPermission"] = "ir.mservices.market.BILLING"
+
         externalNativeBuild {
             cmake {
                 arguments += listOf("-DANDROID_STL=none", "-DANDROID_TOOLCHAIN=clang")
             }
+        }
+    }
+
+    // ── طعم‌های فروشگاه ─────────────────────────────────────────────
+    // هر دو SDK ایرانی (Poolakey و myket-billing-client) کلاس AIDL
+    // com.android.vending.billing.IInAppBillingService را داخل خودشان
+    // باندل می‌کنند؛ کنار هم duplicate class می‌دهد. راه‌حل استاندارد:
+    // هر فروشگاه یک flavor جدا. خروجی:
+    //   app-bazaar-*.apk  → آپلود در بازار
+    //   app-myket-*.apk   → آپلود در مایکت
+    flavorDimensions += "store"
+    productFlavors {
+        create("bazaar") {
+            dimension = "store"
+        }
+        create("myket") {
+            dimension = "store"
         }
     }
 
@@ -30,25 +51,39 @@ android {
         }
     }
 
-    buildTypes {
-        release {
-            // کم‌حجم‌سازی: R8 + حذف منابع بلااستفاده (فقط Compose، بدون AppCompat/XML)
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+    signingConfigs {
+        create("release") {
+            // کلید داخل ریپو است تا کلون و بیلد بی‌دردسر کار کند.
+            // ⚠️ اگر ریپو عمومی است هر کسی می‌تواند با همین کلید امضا کند —
+            // قبل از انتشار تجاری، کلید را بچرخانید و مسیرش را محلی کنید.
+            storeFile = file("segasim-release.jks")
+            storePassword = "segasim123"
+            keyAlias = "segasim"
+            keyPassword = "segasim123"
         }
     }
 
-    // خروجی جدا برای هر معماری → هر APK فقط یک .so حمل می‌کند
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            isShrinkResources = false
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("release")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        debug {
+            // با همان کلید release امضا می‌شود تا روی HyperOS 3 / MIUI هم نصب شود
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    // خروجی جدا برای arm64 + نسخه Universal (همه ABIها در یک APK)
     splits {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = false
+            include("arm64-v8a")
+            isUniversalApk = true
         }
     }
 
@@ -86,6 +121,9 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    // خرید درون‌برنامه‌ای (تنها مسیر مجاز پرداخت مطابق سیاست گوگل‌پلی)
-    implementation("com.android.billingclient:billing-ktx:7.0.0")
+
+    // پرداخت درون‌برنامه‌ای ایرانی — هر SDK فقط در flavor فروشگاه خودش
+    // (هر دو کلاس AIDL مشترک را باندل می‌کنند و نباید کنار هم باشند)
+    "bazaarImplementation"("com.github.cafebazaar.Poolakey:poolakey:2.2.0")
+    "myketImplementation"("com.github.myketstore:myket-billing-client:1.19")
 }

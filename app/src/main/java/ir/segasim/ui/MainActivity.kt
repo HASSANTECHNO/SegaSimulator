@@ -34,7 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import ir.segasim.billing.BillingRepository
+import ir.segasim.billing.EntitlementRepository
 import ir.segasim.catalog.Game
 import ir.segasim.catalog.GameRegistry
 import ir.segasim.catalog.PlayerMode
@@ -73,10 +73,13 @@ class MainActivity : ComponentActivity() {
 fun SegaSimApp() {
     val context = LocalContext.current
     var unlocked by remember { mutableStateOf(false) }
-    val billing = remember { BillingRepository(context) { v -> unlocked = v } }
+    val billing = remember { EntitlementRepository(context) { v -> unlocked = v } }
 
-    LaunchedEffect(Unit) { billing.start() }
-    DisposableEffect(Unit) { onDispose { billing.release() } }
+    LaunchedEffect(Unit) {
+        billing.selectProvider()
+        kotlinx.coroutines.withContext(Dispatchers.IO) { billing.refreshFromStore() }
+    }
+    DisposableEffect(Unit) { onDispose { billing.disconnect() } }
 
     var screen by remember { mutableStateOf<Screen>(Screen.Menu) }
 
@@ -93,6 +96,7 @@ fun SegaSimApp() {
                 )
                 is Screen.Menu -> MenuScreen(
                     unlocked = unlocked,
+                    storeName = billing.providerDisplayName(),
                     onUnlockClick = { (context as? Activity)?.let { billing.launchPurchase(it) } },
                     onPlay = { title, rom, mode, net -> screen = Screen.Play(title, rom, mode, net) },
                 )
@@ -106,6 +110,7 @@ fun SegaSimApp() {
 @Composable
 fun MenuScreen(
     unlocked: Boolean,
+    storeName: String,
     onUnlockClick: () -> Unit,
     onPlay: (String, ByteArray, PlayerMode, NetSync?) -> Unit,
 ) {
@@ -134,11 +139,10 @@ fun MenuScreen(
             Modifier.fillMaxSize().padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // ---- هدر گرادیانی ----
             item {
                 Spacer(Modifier.height(28.dp))
                 Box(
-                    Modifier.fillMaxWidth().height(120.dp)
+                    Modifier.fillMaxWidth().height(140.dp)
                         .background(
                             Brush.linearGradient(listOf(Accent, Accent2)),
                             RoundedCornerShape(20.dp),
@@ -149,30 +153,35 @@ fun MenuScreen(
                         Text("سیمولاتور سگا", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
                         Text("مگا درایو · مستر سیستم · گیم گیر — آفلاین و آنلاین",
                             color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(8.dp).background(
+                                    if (storeName.contains("بازار") || storeName.contains("مایکت"))
+                                        Good else Warn,
+                                    RoundedCornerShape(50),
+                                )
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(storeName, color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
+                        }
                     }
                 }
             }
 
-            // ---- بازی‌های رایگان ----
             item { SectionTitle("🎮 بازی‌های رایگان", Good) }
             items(GameRegistry.freeGames(), key = { it.id }) { g ->
-                GameCard(
-                    game = g, unlocked = true,
-                    onPlay = { mode -> loadAndPlay(g, context, onPlay, { status = it }, mode) },
-                )
+                GameCard(game = g, unlocked = true,
+                    onPlay = { mode -> loadAndPlay(g, context, onPlay, { status = it }, mode) })
             }
 
-            // ---- بسته ویژه (قفل/باز با خرید) ----
-            item { SectionTitle("⭐ بسته ویژه", Warn) }
+            item { SectionTitle("⭐ بسته ویژه (پرداخت از $storeName)", Warn) }
             items(GameRegistry.lockedGames(), key = { it.id }) { g ->
-                GameCard(
-                    game = g, unlocked = unlocked,
+                GameCard(game = g, unlocked = unlocked,
                     onPlay = { mode -> loadAndPlay(g, context, onPlay, { status = it }, mode) },
-                    onUnlock = onUnlockClick,
-                )
+                    onUnlock = onUnlockClick)
             }
 
-            // ---- ROM خودم + آنلاین ----
             item { SectionTitle("📁 ROM خودت", Accent2) }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -186,10 +195,8 @@ fun MenuScreen(
                     val romNow = importedRom
                     if (romNow != null) {
                         PrimaryButton("شروع بازی: $importedName") {
-                            onPlay(
-                                importedName, romNow,
-                                if (twoPlayerImport) PlayerMode.HotSeat else PlayerMode.Single, null,
-                            )
+                            onPlay(importedName, romNow,
+                                if (twoPlayerImport) PlayerMode.HotSeat else PlayerMode.Single, null)
                         }
                     }
                     PrimaryButton("بازی آنلاین (LAN) با دو گوشی") { showNetDialog = true }
@@ -199,7 +206,7 @@ fun MenuScreen(
             item {
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "هسته: Genesis Plus GX (مجوز غیرتجاری) · ROM تجاری همراه اپ توزیع نمی‌شود",
+                    "هسته: Genesis Plus GX (مجوز غیرتجاری) · پرداخت فقط از بازار/مایکت · ROM تجاری همراه اپ توزیع نمی‌شود",
                     color = Sub, fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(34.dp))
@@ -237,13 +244,72 @@ fun MenuScreen(
     }
 }
 
-/** لود ROM باندل‌شده یا دانلود مستقیم از ریلیز سازنده (بازی‌های آزاد ریموت). */
+@Composable
+private fun SectionTitle(text: String, color: Color) {
+    Text(text, color = color, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(top = 8.dp))
+}
+
+@Composable
+private fun GameCard(
+    game: Game, unlocked: Boolean,
+    onPlay: (PlayerMode) -> Unit, onUnlock: (() -> Unit)? = null,
+) {
+    var twoPlayer by remember(game.id) { mutableStateOf(false) }
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Card1),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(46.dp).background(
+                        Brush.linearGradient(listOf(Accent, Accent2)), RoundedCornerShape(12.dp)
+                    ), contentAlignment = Alignment.Center,
+                ) {
+                    Text(if (game.isFree || unlocked) "▶" else "🔒", color = Color.White, fontSize = 18.sp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(game.title, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(game.author, color = Sub, fontSize = 12.sp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(game.description, color = Sub, fontSize = 12.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (game.supportsTwoPlayer) {
+                    TwoChips(
+                        left = Pair("۱ نفر", !twoPlayer),
+                        right = Pair("دونفره", twoPlayer),
+                        onLeft = { twoPlayer = false },
+                        onRight = { twoPlayer = true },
+                    )
+                }
+                if (game.isFree || unlocked) {
+                    Button(
+                        onClick = { onPlay(if (twoPlayer) PlayerMode.HotSeat else PlayerMode.Single) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                    ) { Text("شروع", color = Color.White) }
+                } else {
+                    Button(
+                        onClick = onUnlock ?: {},
+                        colors = ButtonDefaults.buttonColors(containerColor = Warn),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                    ) { Text("باز کردن با خرید (فروشگاه)", color = Color(0xFF1F1400)) }
+                }
+            }
+        }
+    }
+}
+
 private fun loadAndPlay(
-    g: Game,
-    context: android.content.Context,
+    g: Game, context: android.content.Context,
     onPlay: (String, ByteArray, PlayerMode, NetSync?) -> Unit,
-    statusUpdater: (String) -> Unit,
-    mode: PlayerMode,
+    statusUpdater: (String) -> Unit, mode: PlayerMode,
 ) {
     Thread {
         try {
@@ -271,81 +337,12 @@ private fun download(url: String): ByteArray? = try {
     }
 } catch (e: Exception) { null }
 
-/* ===================== اجزای UI ===================== */
-
-@Composable
-private fun SectionTitle(text: String, color: Color) {
-    Text(
-        text, color = color, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(top = 8.dp),
-    )
-}
-
-@Composable
-private fun GameCard(
-    game: Game,
-    unlocked: Boolean,
-    onPlay: (PlayerMode) -> Unit,
-    onUnlock: (() -> Unit)? = null,
-) {
-    var twoPlayer by remember(game.id) { mutableStateOf(false) }
-    Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Card1),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(46.dp).background(
-                        Brush.linearGradient(listOf(Accent, Accent2)), RoundedCornerShape(12.dp)
-                    ), contentAlignment = Alignment.Center,
-                ) {
-                    Text(if (game.isFree || unlocked) "▶" else "🔒", color = Color.White, fontSize = 18.sp)
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(game.title, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text(game.author, color = Sub, fontSize = 12.sp)
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(game.description, color = Sub, fontSize = 12.sp)
-
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (game.supportsTwoPlayer) {
-                    TwoChips(
-                        left = Pair("۱ نفر", !twoPlayer),
-                        right = Pair("دونفره", twoPlayer),
-                        onLeft = { twoPlayer = false },
-                        onRight = { twoPlayer = true },
-                    )
-                }
-                if (game.isFree || unlocked) {
-                    Button(
-                        onClick = { onPlay(if (twoPlayer) PlayerMode.HotSeat else PlayerMode.Single) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-                    ) { Text("شروع", color = Color.White) }
-                } else {
-                    Button(
-                        onClick = onUnlock ?: {},
-                        colors = ButtonDefaults.buttonColors(containerColor = Warn),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-                    ) { Text("باز کردن با خرید", color = Color(0xFF1F1400)) }
-                }
-            }
-        }
-    }
-}
+/* ===================== کنترل‌های لمسی ===================== */
 
 @Composable
 private fun TwoChips(
-    left: Pair<String, Boolean>,
-    right: Pair<String, Boolean>,
-    onLeft: () -> Unit,
-    onRight: () -> Unit,
+    left: Pair<String, Boolean>, right: Pair<String, Boolean>,
+    onLeft: () -> Unit, onRight: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Chip(left.first, left.second, onLeft)
@@ -362,10 +359,8 @@ private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
         color = bg,
         border = BorderStroke(1.dp, if (selected) Color.Transparent else Sub.copy(alpha = 0.4f)),
     ) {
-        Text(
-            label, Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            color = if (selected) Color.White else Sub, fontSize = 13.sp,
-        )
+        Text(label, Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            color = if (selected) Color.White else Sub, fontSize = 13.sp)
     }
 }
 
@@ -389,10 +384,8 @@ fun NetDialog(onConnect: (Boolean, String) -> Unit, onDismiss: () -> Unit) {
         title = { Text("بازی آنلاین (LAN)", color = Txt) },
         text = {
             Column {
-                Text(
-                    "هر دو گوشی باید یک Wi-Fi مشترک داشته باشند.\nمیزبان منتظر می‌ماند؛ مهمان IP میزبان را وارد می‌کند.",
-                    color = Sub, fontSize = 13.sp,
-                )
+                Text("هر دو گوشی باید یک Wi-Fi مشترک داشته باشند.",
+                    color = Sub, fontSize = 13.sp)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(value = ip, onValueChange = { ip = it }, label = { Text("IP میزبان") })
             }
@@ -411,29 +404,20 @@ fun NetDialog(onConnect: (Boolean, String) -> Unit, onDismiss: () -> Unit) {
 
 @Composable
 fun GameScreen(
-    title: String,
-    rom: ByteArray,
-    mode: PlayerMode,
-    net: NetSync?,
-    onExit: () -> Unit,
+    title: String, rom: ByteArray, mode: PlayerMode, net: NetSync?, onExit: () -> Unit,
 ) {
     val context = LocalContext.current
-
-    // stateها قبل از engine تعریف می‌شوند تا listener بتواند آن‌ها را آپدیت کند
     val frameTick = remember { mutableIntStateOf(0) }
     val desync = remember { mutableStateOf(false) }
 
     val engine = remember {
-        EmulatorEngine(
-            net = net, mode = mode,
+        EmulatorEngine(net = net, mode = mode,
             listener = object : EmulatorEngine.Listener {
                 override fun onFrameReady(width: Int, height: Int) { frameTick.intValue++ }
                 override fun onDesync(frame: Long) { desync.value = true }
-            },
-        )
+            })
     }
 
-    // بیت‌مپ ویدیو — در اولین فریم با اندازه واقعی ساخته می‌شود
     var videoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var bmpW by remember { mutableIntStateOf(0) }
     var bmpH by remember { mutableIntStateOf(0) }
@@ -464,10 +448,9 @@ fun GameScreen(
     DisposableEffect(Unit) { onDispose { engine.stop(); net?.disconnect() } }
 
     Column(Modifier.fillMaxSize().background(Color.Black)) {
-        // ---- ویدیو ----
         Box(Modifier.fillMaxWidth().weight(0.58f), contentAlignment = Alignment.Center) {
             if (loaded) {
-                frameTick.intValue // تریگر ری‌کامپوز روی هر فریم
+                frameTick.intValue
                 val src = engine.lastFrame
                 val w = engine.lastWidth
                 val h = engine.lastHeight
@@ -494,13 +477,10 @@ fun GameScreen(
             TextButton(onClick = onExit, modifier = Modifier.align(Alignment.TopStart)) {
                 Text("✕ خروج", color = Color.White)
             }
-            Text(
-                title, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
-            )
+            Text(title, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
         }
 
-        // ---- کنترل‌ها ----
         when (mode) {
             PlayerMode.Single -> TouchControls(
                 label = null,
@@ -508,35 +488,24 @@ fun GameScreen(
                 modifier = Modifier.weight(0.42f).fillMaxWidth(),
             )
             PlayerMode.HotSeat -> Column(Modifier.weight(0.42f).fillMaxWidth()) {
-                TouchControls(
-                    label = "بازیکن ۱", compact = true,
+                TouchControls(label = "بازیکن ۱", compact = true,
                     onPad = { bits -> engine.padBits[0] = bits },
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                )
+                    modifier = Modifier.weight(1f).fillMaxWidth())
                 HorizontalDivider(color = Color(0xFF22272F))
-                TouchControls(
-                    label = "بازیکن ۲", compact = true,
+                TouchControls(label = "بازیکن ۲", compact = true,
                     onPad = { bits -> engine.padBits[1] = bits },
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                )
+                    modifier = Modifier.weight(1f).fillMaxWidth())
             }
         }
     }
 }
 
-/**
- * پد لمسی: D-pad + START + A/B/C — بیت‌ها ۱:۱ به libretro می‌روند.
- * نگاشت هسته: پد B = libretro B، پد C = libretro A، پد A = libretro Y.
- */
 @Composable
 fun TouchControls(
-    label: String?,
-    onPad: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-    compact: Boolean = false,
+    label: String?, onPad: (Int) -> Unit,
+    modifier: Modifier = Modifier, compact: Boolean = false,
 ) {
     val held = remember { mutableStateMapOf<String, Boolean>() }
-
     fun recompute() {
         fun b(k: String, id: Int) = if (held[k] == true) (1 shl id) else 0
         onPad(
@@ -571,9 +540,7 @@ fun TouchControls(
 fun PadButton(
     label: String,
     held: androidx.compose.runtime.snapshots.SnapshotStateMap<String, Boolean>,
-    key: String,
-    recompute: () -> Unit,
-    compact: Boolean,
+    key: String, recompute: () -> Unit, compact: Boolean,
 ) {
     val pressed = held[key] == true
     val bg by animateColorAsState(if (pressed) Accent else Color(0xFF1C222C), label = "pad")
@@ -583,7 +550,7 @@ fun PadButton(
         modifier = Modifier
             .size(
                 width = if (key == "START") (if (compact) 68.dp else 92.dp)
-                        else (if (compact) 52.dp else 68.dp),
+                else (if (compact) 52.dp else 68.dp),
                 height = if (compact) 44.dp else 52.dp,
             )
             .pointerInput(key) {
@@ -597,7 +564,8 @@ fun PadButton(
         border = BorderStroke(1.dp, Color(0xFF2A3140)),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(label, color = if (pressed) Color.White else Sub, fontSize = if (compact) 12.sp else 14.sp)
+            Text(label, color = if (pressed) Color.White else Sub,
+                fontSize = if (compact) 12.sp else 14.sp)
         }
     }
 }
