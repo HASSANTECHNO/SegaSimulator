@@ -40,9 +40,11 @@ import androidx.compose.ui.unit.sp
 import ir.segasim.ui.theme.LocalAppColors
 
 /**
- * تب‌های نوار ناوبری پایین. چون کل برنامه راست‌به‌چپ است و Tab.entries به
+ * تب‌های ممکن نوار ناوبری پایین. چون کل برنامه راست‌به‌رچپ است و لیست به
  * ترتیب پیمایش می‌شود، «خانه» در سمت راست قرار می‌گیرد (مثل تلگرام فارسی).
+ *
  * ترتیب خوانده‌شده از راست به چپ: خانه، بازی‌های من، پریمیوم، حساب.
+ * تب «پریمیوم» فقط تا وقتی خرید انجام نشده نمایش داده می‌شود.
  */
 enum class Tab(val label: String, val icon: ImageVector) {
     Home("خانه", Icons.Filled.Home),
@@ -56,11 +58,14 @@ enum class Tab(val label: String, val icon: ImageVector) {
  *  • یک قرص شناور با گوشه‌های گرد
  *  • پس‌زمینه‌ی نیمه‌شفاف با گرادیان ملایم (حس شیشه/بلور)
  *  • خط مویی روشن روی لبه‌ها + سایه‌ی نرم
- *  • خانه‌ی فعال با قرص رنگی ملایم و متن بولد
+ *  • تب فعال با قرص آبی ملایم و متن بولد
+ *
+ * [tabs] عمداً پارامتر است تا پس از خرید پریمیوم، تبِ اضافه از نوار حذف شود.
  */
 @Composable
 fun GlassNavBar(
     selected: Tab,
+    tabs: List<Tab>,
     onSelect: (Tab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -82,7 +87,7 @@ fun GlassNavBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            Tab.entries.forEach { tab ->
+            tabs.forEach { tab ->
                 NavItem(
                     tab = tab,
                     active = selected == tab,

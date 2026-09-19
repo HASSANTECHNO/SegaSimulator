@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- پس‌زمینه‌ی اسپلش و نوارهای سیستم: مشکی، مثل سالن تاریک کنسول -->
+    <color name="splash_bg">#FF04060A</color>
+    <!-- آبی سگا (نسخه‌ی روشن‌شده برای خوانایی روی مشکی) -->
+    <color name="sega_blue">#FF2F7DF6</color>
+</resources>

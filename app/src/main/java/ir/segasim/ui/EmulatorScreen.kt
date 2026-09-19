@@ -42,36 +42,58 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ir.segasim.catalog.PlayerMode
 import ir.segasim.emu.EmulatorEngine
+import ir.segasim.ui.theme.AppColors
 import ir.segasim.ui.theme.LocalAppColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.ShortBuffer
 
-/* بیت‌های ورودی دسته‌ی مگا درایو (۳ دکمه) */
-private const val BIT_UP = 0x0001
-private const val BIT_DOWN = 0x0002
-private const val BIT_LEFT = 0x0004
-private const val BIT_RIGHT = 0x0008
-private const val BIT_B = 0x0010
-private const val BIT_C = 0x0020
-private const val BIT_A = 0x0040
-private const val BIT_START = 0x0080
+/* ------------------------------------------------------------------ *
+ * بیت‌های ورودی — دقیقاً بر اساس ایندکس‌های استاندارد libretro         *
+ * (RETRO_DEVICE_ID_JOYPAD_*).                                          *
+ *                                                                     *
+ * باگ نسخه‌ی قبل: این اعداد با «بیت‌های خام جنسیس» یکی گرفته شده بود  *
+ * (UP=0x1، B=0x10 …) در حالی که هسته‌ی Genesis Plus GX بیتِ n را به    *
+ * عنوان RETRO_DEVICE_ID_JOYPAD_n می‌خواند. نتیجه: دی‌پد روی دکمه‌های    *
+ * B/C/A می‌افتاد و کل دسته جابه‌جا/برعکس کار می‌کرد.                  *
+ *                                                                     *
+ * نقشه‌ی واقعی هسته (از جدول retro_input_descriptor در libretro.c):   *
+ *   RETRO B(0) → B سگا   |  RETRO Y(1) → A سگا                       *
+ *   START(3)             |  UP(4) DOWN(5) LEFT(6) RIGHT(7)             *
+ *   RETRO A(8) → C سگا   |  RETRO X(9) → Y سگا                        *
+ *   RETRO L(10) → X سگا  |  RETRO R(11) → Z سگا                       *
+ * ------------------------------------------------------------------ */
+private const val BIT_B = 1 shl 0        // 0x0001 — دکمه‌ی B سگا
+private const val BIT_A = 1 shl 1        // 0x0002 — دکمه‌ی A سگا
+private const val BIT_START = 1 shl 3    // 0x0008 — START
+private const val BIT_UP = 1 shl 4       // 0x0010 — بالا
+private const val BIT_DOWN = 1 shl 5     // 0x0020 — پایین
+private const val BIT_LEFT = 1 shl 6     // 0x0040 — چپ
+private const val BIT_RIGHT = 1 shl 7    // 0x0080 — راست
+private const val BIT_C = 1 shl 8        // 0x0100 — دکمه‌ی C سگا
+private const val BIT_Y = 1 shl 9        // 0x0200 — Y سگا (ردیف بالا)
+private const val BIT_X = 1 shl 10       // 0x0400 — X سگا
+private const val BIT_Z = 1 shl 11       // 0x0800 — Z سگا
 
 /**
- * صفحه‌ی اجرای بازی: ویدیو (RGB565) در بالا، دسته‌ی لمسی سگا در پایین.
- * در حالت دونفره، بالای صفحه دسته‌ی بازیکن ۲ و پایین دسته‌ی بازیکن ۱.
+ * صفحه‌ی اجرای بازی: ویدیو (RGB565) در بالا، دسته‌ی لمسی ۶ دکمه‌ای
+ * (چیدمان سگا ستورن) در پایین. در حالت دونفره، بالای صفحه دسته‌ی
+ * بازیکن ۲ و پایین دسته‌ی بازیکن ۱ است — هر دو با همان چیدمان.
  */
 @Composable
 fun EmulatorScreen(session: PlaySession, onExit: () -> Unit) {
@@ -193,7 +215,7 @@ fun EmulatorScreen(session: PlaySession, onExit: () -> Unit) {
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     compact = true,
                 )
-                HorizontalDivider(color = Color(0xFF1D222B))
+                HorizontalDivider(color = Color(0xFF11161F))
                 SegaPad(
                     label = "بازیکن ۱",
                     onBits = { engine.padBits[0] = it },
@@ -220,11 +242,16 @@ private fun ExitChip(onExit: () -> Unit) {
 }
 
 /**
- * دسته‌ی لمسی سگا مگا درایو (۳ دکمه):
- *  • چپ: دی‌پد (+)
- *  • راست: دکمه‌های A B C روی یک قوس بالارونده + START
- * چیدمان داخل دسته همیشه چپ‌به‌راست است تا شبیه دسته‌ی واقعی بماند،
- * حتی وقتی کل برنامه راست‌به‌چپ است.
+ * دسته‌ی لمسی ۶ دکمه‌ای به سبک سگا ستورن (مطابق تصویری که کاربر فرستاد):
+ *  • چپ : یک صفحه‌ی گرد با دی‌پد (+) و فلش‌های ▲ ◀ ▶ ▼
+ *  • راست: شش دکمه‌ی گرد در دو ردیفِ کج‌شده —
+ *          ردیف پایین A B C (A پایین‌ترین، C بالاتر)
+ *          ردیف بالا  X Y Z (X پایین‌ترین، Z بالاترین)
+ *  • وسطِ پایین: دکمه‌ی بیضی START
+ *
+ * چیدمان داخل دسته با LayoutDirection.Ltr قفل شده تا در برنامه‌ی
+ * راست‌به‌چپ آینه نشود؛ دسته‌ی واقعی هم همین شکل است.
+ * هر دو دسته (بازیکن ۱ و ۲) دقیقاً همین چیدمان را دارند.
  */
 @Composable
 fun SegaPad(
@@ -235,7 +262,7 @@ fun SegaPad(
 ) {
     val c = LocalAppColors.current
     val held = remember { mutableStateMapOf<Int, Boolean>() }
-    val key = if (compact) 42.dp else 54.dp
+    val key = if (compact) 30.dp else 46.dp
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Box(modifier) {
@@ -249,52 +276,104 @@ fun SegaPad(
                 Modifier
                     .fillMaxSize()
                     .padding(
-                        top = if (label != null) 15.dp else 4.dp,
-                        start = 16.dp, end = 16.dp, bottom = 4.dp,
+                        top = if (label != null) 14.dp else 2.dp,
+                        start = 12.dp, end = 12.dp, bottom = 2.dp,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                DPad(held, onBits, key)
+                SegaDPad(held, onBits, key)
                 Spacer(Modifier.weight(1f))
-                RightCluster(held, onBits, key, compact)
+                FaceCluster(held, onBits, key)
             }
+            StartKey(
+                held, onBits,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (compact) 0.dp else 4.dp),
+                key = key,
+            )
         }
     }
 }
 
+/** صفحه‌ی گرد دی‌پد با بازوهای صلیبی و چهار فلش. */
 @Composable
-private fun DPad(held: MutableMap<Int, Boolean>, onBits: (Int) -> Unit, key: androidx.compose.ui.unit.Dp) {
-    Box(Modifier.size(key * 3)) {
-        PadKey("▲", BIT_UP, held, onBits, Modifier.align(Alignment.TopCenter).size(key))
-        PadKey("◀", BIT_LEFT, held, onBits, Modifier.align(Alignment.CenterStart).size(key))
-        PadKey("▶", BIT_RIGHT, held, onBits, Modifier.align(Alignment.CenterEnd).size(key))
-        PadKey("▼", BIT_DOWN, held, onBits, Modifier.align(Alignment.BottomCenter).size(key))
-    }
-}
-
-@Composable
-private fun RightCluster(
+private fun SegaDPad(
     held: MutableMap<Int, Boolean>,
     onBits: (Int) -> Unit,
-    key: androidx.compose.ui.unit.Dp,
-    compact: Boolean,
+    key: Dp,
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            // قوس بالارونده: A پایین‌چپ، B وسط، C بالاراست — مثل دسته‌ی واقعی
-            PadKey("A", BIT_A, held, onBits, Modifier.offset(y = key / 3).size(key))
-            Spacer(Modifier.width(9.dp))
-            PadKey("B", BIT_B, held, onBits, Modifier.offset(y = key / 6).size(key))
-            Spacer(Modifier.width(9.dp))
-            PadKey("C", BIT_C, held, onBits, Modifier.size(key))
-        }
-        Spacer(Modifier.height(12.dp))
-        PadKey(
-            "START", BIT_START, held, onBits,
-            Modifier.width(key * 2).height(if (compact) 30.dp else 36.dp),
-            round = true, compact = true,
+    val c = LocalAppColors.current
+    val d = key * 3.3f
+    Box(Modifier.size(d), contentAlignment = Alignment.Center) {
+        // صفحه‌ی گرد
+        Box(
+            Modifier.fillMaxSize().clip(CircleShape)
+                .background(Brush.verticalGradient(listOf(c.cardAlt, c.card)))
+                .border(1.dp, c.line, CircleShape)
         )
+        // بازوهای صلیبی
+        Box(
+            Modifier.size(width = key * 1.12f, height = d * 0.88f)
+                .clip(RoundedCornerShape(key * 0.2f))
+                .background(Brush.verticalGradient(listOf(c.card, c.bg)))
+        )
+        Box(
+            Modifier.size(width = d * 0.88f, height = key * 1.12f)
+                .clip(RoundedCornerShape(key * 0.2f))
+                .background(Brush.verticalGradient(listOf(c.card, c.bg)))
+        )
+        // مرکز
+        Box(Modifier.size(key * 0.46f).clip(CircleShape).background(c.bg.copy(alpha = 0.9f)))
+        // چهار جهت
+        PadKey("▲", BIT_UP, held, onBits, Modifier.align(Alignment.TopCenter).size(key), flat = true)
+        PadKey("▼", BIT_DOWN, held, onBits, Modifier.align(Alignment.BottomCenter).size(key), flat = true)
+        PadKey("◀", BIT_LEFT, held, onBits, Modifier.align(Alignment.CenterStart).size(key), flat = true)
+        PadKey("▶", BIT_RIGHT, held, onBits, Modifier.align(Alignment.CenterEnd).size(key), flat = true)
     }
+}
+
+/**
+ * شش دکمه‌ی کنش در دو ردیفِ کج‌شده (بالا-راست).
+ * ردیف پایین: A B C — ردیف بالا: X Y Z
+ */
+@Composable
+private fun FaceCluster(
+    held: MutableMap<Int, Boolean>,
+    onBits: (Int) -> Unit,
+    key: Dp,
+) {
+    val g = key * 0.16f
+    val w = key * 3.6f + g * 2f
+    val h = key * 2.25f
+    Box(Modifier.size(width = w, height = h)) {
+        // ردیف بالا: X Y Z
+        PadKey("X", BIT_X, held, onBits, Modifier.offset(x = key * 0.55f, y = key * 0.34f).size(key))
+        PadKey("Y", BIT_Y, held, onBits, Modifier.offset(x = key * 1.55f + g, y = key * 0.18f).size(key))
+        PadKey("Z", BIT_Z, held, onBits, Modifier.offset(x = key * 2.55f + g * 2f, y = 0.dp).size(key))
+        // ردیف پایین: A B C
+        PadKey("A", BIT_A, held, onBits, Modifier.offset(x = 0.dp, y = key * 1.20f).size(key))
+        PadKey("B", BIT_B, held, onBits, Modifier.offset(x = key + g, y = key * 0.96f).size(key))
+        PadKey("C", BIT_C, held, onBits, Modifier.offset(x = key * 2f + g * 2f, y = key * 0.72f).size(key))
+    }
+}
+
+/** دکمه‌ی START: بیضی کوچک وسطِ پایین. */
+@Composable
+private fun StartKey(
+    held: MutableMap<Int, Boolean>,
+    onBits: (Int) -> Unit,
+    modifier: Modifier,
+    key: Dp,
+) {
+    PadKey(
+        label = "START",
+        key = BIT_START,
+        held = held,
+        onBits = onBits,
+        modifier = modifier.width(key * 2f).height(key * 0.62f),
+        pill = true,
+    )
 }
 
 private fun computeBits(held: Map<Int, Boolean>): Int {
@@ -306,14 +385,16 @@ private fun computeBits(held: Map<Int, Boolean>): Int {
     if (held[BIT_A] == true) b = b or BIT_A
     if (held[BIT_B] == true) b = b or BIT_B
     if (held[BIT_C] == true) b = b or BIT_C
+    if (held[BIT_X] == true) b = b or BIT_X
+    if (held[BIT_Y] == true) b = b or BIT_Y
+    if (held[BIT_Z] == true) b = b or BIT_Z
     if (held[BIT_START] == true) b = b or BIT_START
     return b
 }
 
 /**
- * یک دکمه‌ی دسته با نگه‌داشتن درست: تا وقتی انگشت روی دکمه است بیت آن
- * روشن می‌ماند و با برداشتن انگشت خاموش می‌شود. این همان چیزی است که
- * قبلاً کار نمی‌کرد (بیت بلافاصله آزاد می‌شد و حرکت/شلیک ثبت نمی‌شد).
+ * یک دکمه‌ی دسته با «نگه‌داشتن» درست: تا وقتی انگشت روی دکمه است بیت آن
+ * روشن می‌ماند و با برداشتن انگشت خاموش می‌شود.
  */
 @Composable
 private fun PadKey(
@@ -322,18 +403,28 @@ private fun PadKey(
     held: MutableMap<Int, Boolean>,
     onBits: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    round: Boolean = false,
-    compact: Boolean = false,
+    flat: Boolean = false,
+    pill: Boolean = false,
 ) {
     val c = LocalAppColors.current
     var pressed by remember { mutableStateOf(false) }
-    val shape = if (round) CircleShape else RoundedCornerShape(if (compact) 12.dp else 16.dp)
+    val shape: Shape = if (pill) RoundedCornerShape(999.dp) else CircleShape
 
     Box(
         modifier
             .clip(shape)
-            .background(if (pressed) c.accent else c.cardAlt)
-            .border(1.dp, if (pressed) c.accent else c.line, shape)
+            .then(
+                if (!flat) {
+                    Modifier.background(
+                        if (pressed) Brush.verticalGradient(listOf(c.accent, c.accent.copy(alpha = 0.82f)))
+                        else Brush.verticalGradient(listOf(c.cardAlt, c.card))
+                    ).border(1.dp, if (pressed) c.accent else c.line, shape)
+                } else Modifier
+            )
+            .then(
+                if (flat && pressed) Modifier.background(c.accent.copy(alpha = 0.55f), shape)
+                else Modifier
+            )
             .pointerInput(key) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
@@ -350,9 +441,9 @@ private fun PadKey(
     ) {
         Text(
             label,
-            color = if (pressed) c.accentOn else c.txt,
-            fontSize = if (compact) 11.sp else 14.sp,
-            fontWeight = FontWeight.Bold,
+            color = if (pressed) (if (flat) c.txt else c.accentOn) else (if (flat) c.sub else c.txt),
+            fontSize = if (pill) 10.sp else if (key >= 40) 15.sp else 12.sp,
+            fontWeight = if (pill) FontWeight.Bold else FontWeight.Medium,
         )
     }
 }

@@ -164,14 +164,22 @@ static size_t audio_sample_batch_cb(const int16_t *data, size_t frames)
 
 static void input_poll_cb(void) { /* input comes from JNI bitfield */ }
 
-/* The core reads standard RETRO_DEVICE_ID_JOYPAD_* ids (0..15).
- * Our Kotlin layer already encodes them 1:1 into joypad_bits[pad]. */
+/* The core reads standard RETRO_DEVICE_ID_JOYPAD_* ids; our Kotlin layer
+ * encodes the bitfield with the SAME index convention, so bit n answers
+ * RETRO_DEVICE_ID_JOYPAD_n (B=0, Y=1, START=3, UP=4..RIGHT=7, A=8, X=9,
+ * L=10, R=11). Do NOT use raw Genesis bit positions here. */
 static int16_t input_state_cb(unsigned port, unsigned device,
                               unsigned index, unsigned id)
 {
    (void)device; (void)index;
    if (port >= 2)
       return 0;
+   /* Some core paths request the whole joypad state at once via
+    * RETRO_DEVICE_ID_JOYPAD_MASK; answer with the raw bitfield. */
+#ifdef RETRO_DEVICE_ID_JOYPAD_MASK
+   if (id == RETRO_DEVICE_ID_JOYPAD_MASK)
+      return (int16_t)(joypad_bits[port] & 0xFFFF);
+#endif
    if (id >= 16)
       return 0;
    return (joypad_bits[port] >> id) & 1;

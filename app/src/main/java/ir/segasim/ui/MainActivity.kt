@@ -83,6 +83,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
 fun AppRoot() {
     val context = LocalContext.current
     var dark by remember { mutableStateOf(SettingsStore(context).isDark()) }
+    var splash by remember { mutableStateOf(true) }
     var tab by remember { mutableStateOf(Tab.Home) }
     var playing by remember { mutableStateOf<PlaySession?>(null) }
 
@@ -93,61 +94,78 @@ fun AppRoot() {
         withContext(Dispatchers.IO) { billing.refreshFromStore() }
     }
 
+    // پس از خرید، تب «پریمیوم» از نوار پایین حذف می‌شود
+    val tabs = remember(unlocked) {
+        if (unlocked) listOf(Tab.Home, Tab.Mine, Tab.Account)
+        else listOf(Tab.Home, Tab.Mine, Tab.Premium, Tab.Account)
+    }
+    LaunchedEffect(unlocked) {
+        if (unlocked && tab == Tab.Premium) tab = Tab.Mine
+    }
+
     AppTheme(dark = dark) {
         // کل برنامه راست‌به‌رچپ — «خانه»ی اول در سمت راست نوار ناوبری
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
             val c = LocalAppColors.current
-            val session = playing
-            if (session != null) {
-                EmulatorScreen(
-                    session = session,
-                    onExit = {
-                        playing = null
-                        billing_refresh(billing)
-                    },
-                )
+            if (splash) {
+                SegaLakSplash(onDone = { splash = false })
             } else {
-                Box(Modifier.fillMaxSize().background(c.bg)) {
-                    Column(
-                        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
-                    ) {
-                        Box(Modifier.weight(1f)) {
-                            when (tab) {
-                                Tab.Home -> HomeTab(
-                                    unlocked = unlocked,
-                                    storeName = billing.providerDisplayName(),
-                                    onGoTab = { tab = it },
-                                )
-                                Tab.Mine -> MyGamesTab(
-                                    unlocked = unlocked,
-                                    onPlay = { playing = it },
-                                    onUnlock = {
-                                        (context as? Activity)?.let { billing.launchPurchase(it) }
-                                    },
-                                )
-                                Tab.Premium -> PremiumTab(
-                                    unlocked = unlocked,
-                                    storeName = billing.providerDisplayName(),
-                                    onPlay = { playing = it },
-                                    onUnlock = {
-                                        (context as? Activity)?.let { billing.launchPurchase(it) }
-                                    },
-                                )
-                                Tab.Account -> AccountTab(
-                                    unlocked = unlocked,
-                                    storeName = billing.providerDisplayName(),
-                                    dark = dark,
-                                    onToggleDark = {
-                                        dark = it
-                                        SettingsStore(context).setDark(it)
-                                    },
-                                    onUnlockClick = {
-                                        (context as? Activity)?.let { billing.launchPurchase(it) }
-                                    },
-                                )
+                val session = playing
+                if (session != null) {
+                    EmulatorScreen(
+                        session = session,
+                        onExit = {
+                            playing = null
+                            billingRefresh(billing)
+                        },
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize().background(c.bg)) {
+                        Column(
+                            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
+                        ) {
+                            Box(Modifier.weight(1f)) {
+                                when (tab) {
+                                    Tab.Home -> HomeTab(
+                                        unlocked = unlocked,
+                                        storeName = billing.providerDisplayName(),
+                                        onGoTab = { tab = it },
+                                    )
+                                    Tab.Mine -> MyGamesTab(
+                                        unlocked = unlocked,
+                                        onPlay = { playing = it },
+                                        onUnlock = {
+                                            (context as? Activity)?.let { billing.launchPurchase(it) }
+                                        },
+                                    )
+                                    Tab.Premium -> PremiumTab(
+                                        unlocked = unlocked,
+                                        storeName = billing.providerDisplayName(),
+                                        onPlay = { playing = it },
+                                        onUnlock = {
+                                            (context as? Activity)?.let { billing.launchPurchase(it) }
+                                        },
+                                    )
+                                    Tab.Account -> AccountTab(
+                                        unlocked = unlocked,
+                                        storeName = billing.providerDisplayName(),
+                                        dark = dark,
+                                        onToggleDark = {
+                                            dark = it
+                                            SettingsStore(context).setDark(it)
+                                        },
+                                        onUnlockClick = {
+                                            (context as? Activity)?.let { billing.launchPurchase(it) }
+                                        },
+                                    )
+                                }
                             }
+                            GlassNavBar(
+                                selected = tab,
+                                tabs = tabs,
+                                onSelect = { tab = it },
+                            )
                         }
-                        GlassNavBar(selected = tab, onSelect = { tab = it })
                     }
                 }
             }
@@ -159,7 +177,7 @@ fun AppRoot() {
     }
 }
 
-private fun billing_refresh(repo: EntitlementRepository) {
+private fun billingRefresh(repo: EntitlementRepository) {
     // پس از بازگشت از بازی، وضعیت خرید را تازه می‌کنیم
     GlobalScope.launch(Dispatchers.IO) { repo.refreshFromStore() }
 }
@@ -181,7 +199,7 @@ private fun HomeTab(
         item {
             Spacer(Modifier.height(10.dp))
             Column {
-                Text("سیمولاتور سگا", color = c.txt, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                Text("سگالاک", color = c.txt, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(3.dp))
                 Text(
                     "مگا درایو · مستر سیستم · گیم گیر · سگا سی‌دی",
@@ -203,7 +221,21 @@ private fun HomeTab(
             Spacer(Modifier.height(9.dp))
             AppCard {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    PrimaryButton("★  بازی‌های پریمیوم", filled = true) { onGoTab(Tab.Premium) }
+                    if (!unlocked) {
+                        PrimaryButton("★  بازی‌های پریمیوم", filled = true) { onGoTab(Tab.Premium) }
+                    } else {
+                        Box(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(c.good.copy(alpha = 0.14f))
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                "بسته‌ی پریمیوم شما فعال است — بازی‌ها در «بازی‌های من» هستند.",
+                                color = c.good, fontSize = 12.sp,
+                            )
+                        }
+                    }
                     PrimaryButton("＋  افزودن ROM از دستگاه", filled = false) { onGoTab(Tab.Mine) }
                     PrimaryButton("👤  حساب و تنظیمات", filled = false) { onGoTab(Tab.Account) }
                 }
@@ -215,9 +247,9 @@ private fun HomeTab(
             Spacer(Modifier.height(9.dp))
             AppCard {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Tip("۱", "بازی‌های پریمیوم از پیش آماده‌اند؛ کافی است بسته را یک‌بار بخری — نیازی به افزودن ROM نیست.")
-                    Tip("۲", "پس از خرید، بازی‌ها در تب «بازی‌های من» زیر بخش پریمیوم باز می‌شوند.")
-                    Tip("۳", "ROMهای خودت را از «بازی‌های من» اضافه کن؛ دسته‌ی لمسی سگا روی همه‌ی بازی‌ها کار می‌کند.")
+                    Tip("۱", "جمله‌بازی‌های پریمیوم از پیش آماده‌اند؛ کافی است بسته را یک‌بار بخری — نیازی به افزودن ROM نیست.")
+                    Tip("۲", "پس از خرید، بازی‌ها در تب «بازی‌های من» زیر بخش پریمیوم باز می‌شوند و تب پریمیوم از نوار پایین حذف می‌شود.")
+                    Tip("۳", "ROMهای خودت را از «بازی‌های من» اضافه کن؛ دسته‌ی لمسی سگا (۶ دکمه) روی همه‌ی بازی‌ها کار می‌کند.")
                     Tip("۴", "خرید از بازار یا مایکت انجام می‌شود؛ پس از حذف و نصب مجدد، خرید خودکار برمی‌گردد.")
                 }
             }
@@ -600,7 +632,7 @@ private fun AccountTab(
                     Column(Modifier.weight(1f)) {
                         Text("تم تاریک", color = c.txt, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
                         Text(
-                            if (dark) "فعال" else "غیرفعال (تم روشن)",
+                            if (dark) "فعال — مشکی و آبی" else "غیرفعال — سفید و آبی",
                             color = c.sub, fontSize = 11.5.sp,
                         )
                     }
@@ -621,8 +653,9 @@ private fun AccountTab(
             Spacer(Modifier.height(9.dp))
             AppCard {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    InfoLine("نسخه", "۰.۵.۰")
+                    InfoLine("نسخه", "۰.۶.۰")
                     InfoLine("هسته", "Genesis Plus GX")
+                    InfoLine("دسته", "۶ دکمه — سبک سگا ستورن")
                     InfoLine("پرداخت", "بازار / مایکت")
                     InfoLine("مجوز هسته", "غیرتجاری — جزئیات در NOTICE.md")
                 }
