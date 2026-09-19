@@ -12,8 +12,8 @@ android {
         applicationId = "ir.segasim"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
 
         // پلیس‌هولدرهای مانیفست کتابخانه‌ی مایکت — بدون این‌ها merge مانیفست شکست می‌خورد
         manifestPlaceholders["marketApplicationId"] = "ir.mservices.market"
