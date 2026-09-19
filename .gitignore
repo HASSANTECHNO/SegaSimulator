@@ -10,3 +10,6 @@ captures/
 .externalNativeBuild/
 *.apk
 *.aab
+
+# ROMهای پریمیوم (تجاری) — فقط برای تست محلی، در مخزن عمومی منتشر نشود
+app/src/main/assets/games/premium/

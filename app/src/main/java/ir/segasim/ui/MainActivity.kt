@@ -2,12 +2,11 @@ package ir.segasim.ui
 
 import android.app.Activity
 import android.net.Uri
-import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,15 +23,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,15 +43,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.CompositionLocalProvider
 import ir.segasim.billing.EntitlementRepository
+import ir.segasim.catalog.Game
 import ir.segasim.catalog.GameRegistry
 import ir.segasim.catalog.PlayerMode
 import ir.segasim.data.MyGamesStore
@@ -58,6 +60,7 @@ import ir.segasim.net.NetSync
 import ir.segasim.ui.theme.AppTheme
 import ir.segasim.ui.theme.LocalAppColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -91,12 +94,11 @@ fun AppRoot() {
     }
 
     AppTheme(dark = dark) {
-        val c = LocalAppColors.current
-        // کل برنامه راست‌به‌چپ — خانه‌ی اول در سمت راست نوار ناوبری
+        // کل برنامه راست‌به‌رچپ — «خانه»ی اول در سمت راست نوار ناوبری
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+            val c = LocalAppColors.current
             val session = playing
             if (session != null) {
-                // تماس با سیستم در حین بازی؛ نوار ناوبری پنهان می‌شود
                 EmulatorScreen(
                     session = session,
                     onExit = {
@@ -105,23 +107,32 @@ fun AppRoot() {
                     },
                 )
             } else {
-                Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize().background(c.bg)) {
                     Column(
-                        Modifier
-                            .fillMaxSize()
-                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
                     ) {
                         Box(Modifier.weight(1f)) {
                             when (tab) {
                                 Tab.Home -> HomeTab(
                                     unlocked = unlocked,
                                     storeName = billing.providerDisplayName(),
-                                    onPlay = { playing = it },
                                     onGoTab = { tab = it },
                                 )
-                                Tab.Duo -> DuoTab(onPlay = { playing = it })
-                                Tab.Mine -> MyGamesTab(onPlay = { playing = it })
-                                Tab.Free -> FreeTab(onPlay = { playing = it })
+                                Tab.Mine -> MyGamesTab(
+                                    unlocked = unlocked,
+                                    onPlay = { playing = it },
+                                    onUnlock = {
+                                        (context as? Activity)?.let { billing.launchPurchase(it) }
+                                    },
+                                )
+                                Tab.Premium -> PremiumTab(
+                                    unlocked = unlocked,
+                                    storeName = billing.providerDisplayName(),
+                                    onPlay = { playing = it },
+                                    onUnlock = {
+                                        (context as? Activity)?.let { billing.launchPurchase(it) }
+                                    },
+                                )
                                 Tab.Account -> AccountTab(
                                     unlocked = unlocked,
                                     storeName = billing.providerDisplayName(),
@@ -143,14 +154,14 @@ fun AppRoot() {
         }
     }
 
-    androidx.compose.runtime.DisposableEffect(Unit) {
+    DisposableEffect(Unit) {
         onDispose { billing.disconnect() }
     }
 }
 
 private fun billing_refresh(repo: EntitlementRepository) {
-    // پس از بازگشت از بازی، وضعیت خرید را تازه می‌کنیم (خرید ممکن است در همان لحظه کامل شده باشد)
-    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) { repo.refreshFromStore() }
+    // پس از بازگشت از بازی، وضعیت خرید را تازه می‌کنیم
+    GlobalScope.launch(Dispatchers.IO) { repo.refreshFromStore() }
 }
 
 /* ===================== تب خانه ===================== */
@@ -159,13 +170,9 @@ private fun billing_refresh(repo: EntitlementRepository) {
 private fun HomeTab(
     unlocked: Boolean,
     storeName: String,
-    onPlay: (PlaySession) -> Unit,
     onGoTab: (Tab) -> Unit,
 ) {
     val c = LocalAppColors.current
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var status by remember { mutableStateOf("") }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 18.dp),
@@ -185,7 +192,7 @@ private fun HomeTab(
 
         item {
             StatusRow(
-                label = if (unlocked) "بسته‌ی کامل باز است" else "بسته‌ی کامل قفل است",
+                label = if (unlocked) "بسته‌ی پریمیوم فعال است" else "بسته‌ی پریمیوم قفل است",
                 ok = unlocked,
                 storeName = storeName,
             )
@@ -196,9 +203,9 @@ private fun HomeTab(
             Spacer(Modifier.height(9.dp))
             AppCard {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    PrimaryButton("▶  بازی‌های رایگان آماده", filled = true) { onGoTab(Tab.Free) }
-                    PrimaryButton("👥  بازی دونفره روی همین گوشی", filled = false) { onGoTab(Tab.Duo) }
+                    PrimaryButton("★  بازی‌های پریمیوم", filled = true) { onGoTab(Tab.Premium) }
                     PrimaryButton("＋  افزودن ROM از دستگاه", filled = false) { onGoTab(Tab.Mine) }
+                    PrimaryButton("👤  حساب و تنظیمات", filled = false) { onGoTab(Tab.Account) }
                 }
             }
         }
@@ -208,9 +215,9 @@ private fun HomeTab(
             Spacer(Modifier.height(9.dp))
             AppCard {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Tip("۱", "سه بازی رایگان از پیش نصب‌شده‌اند؛ بدون اینترنت هم اجرا می‌شوند.")
-                    Tip("۲", "برای بازی دو نفره، گوشی را به‌صورت افقی بگیر و ROM دونفره را از تب «بازی من» انتخاب کن.")
-                    Tip("۳", "بازی شبکه‌ای (LAN) با دو گوشی روی یک وای‌فای از تب «بازی من» انجام می‌شود.")
+                    Tip("۱", "بازی‌های پریمیوم از پیش آماده‌اند؛ کافی است بسته را یک‌بار بخری — نیازی به افزودن ROM نیست.")
+                    Tip("۲", "پس از خرید، بازی‌ها در تب «بازی‌های من» زیر بخش پریمیوم باز می‌شوند.")
+                    Tip("۳", "ROMهای خودت را از «بازی‌های من» اضافه کن؛ دسته‌ی لمسی سگا روی همه‌ی بازی‌ها کار می‌کند.")
                     Tip("۴", "خرید از بازار یا مایکت انجام می‌شود؛ پس از حذف و نصب مجدد، خرید خودکار برمی‌گردد.")
                 }
             }
@@ -233,7 +240,7 @@ private fun Tip(n: String, text: String) {
     Row(verticalAlignment = Alignment.Top) {
         Box(
             Modifier.size(20.dp)
-                .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+                .clip(RoundedCornerShape(7.dp))
                 .background(c.accentSoft),
             contentAlignment = Alignment.Center,
         ) { Text(n, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
@@ -252,7 +259,7 @@ private fun StatusRow(label: String, ok: Boolean, storeName: String) {
         ) {
             Box(
                 Modifier.size(9.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
                     .background(if (ok) c.good else c.warn)
             )
             Spacer(Modifier.width(9.dp))
@@ -264,21 +271,18 @@ private fun StatusRow(label: String, ok: Boolean, storeName: String) {
     }
 }
 
-/* ===================== تب دونفره ===================== */
+/* ===================== تب پریمیوم ===================== */
 
 @Composable
-private fun DuoTab(onPlay: (PlaySession) -> Unit) {
+private fun PremiumTab(
+    unlocked: Boolean,
+    storeName: String,
+    onPlay: (PlaySession) -> Unit,
+    onUnlock: () -> Unit,
+) {
     val c = LocalAppColors.current
     val context = LocalContext.current
-    val store = remember { MyGamesStore(context) }
-    val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf("") }
-    var refresh by remember { mutableStateOf(0) }
-
-    val twoPlayerGames = remember(refresh) {
-        GameRegistry.games.filter { it.supportsTwoPlayer || it.isFree }
-    }
-    val myTwoPlayer = remember(refresh) { store.list().filter { it.twoPlayer } }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 18.dp),
@@ -286,67 +290,77 @@ private fun DuoTab(onPlay: (PlaySession) -> Unit) {
     ) {
         item {
             Spacer(Modifier.height(10.dp))
-            Text("بازی دونفره", color = c.txt, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+            Text("بازی‌های پریمیوم", color = c.txt, fontSize = 25.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(3.dp))
-            Text("دو بازیکن روی همین گوشی — هر طرف صفحه یک دسته", color = c.sub, fontSize = 12.sp)
-        }
-        item { Spacer(Modifier.height(2.dp)) }
-        item { InlineStatus(status) }
-
-        if (myTwoPlayer.isNotEmpty()) {
-            item { SectionTitle("از بازی‌های من", "${myTwoPlayer.size} مورد") }
-            items(myTwoPlayer, key = { it.id }) { e ->
-                AppCard {
-                    Column(Modifier.padding(14.dp)) {
-                        Text(e.name, color = c.txt, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(3.dp))
-                        Text("دو نفره · ${readableSize(e.sizeBytes)}", color = c.sub, fontSize = 11.5.sp)
-                        Spacer(Modifier.height(10.dp))
-                        Row {
-                            Spacer(Modifier.weight(1f))
-                            SmallAction("شروع", c.accent, c.accentOn) {
-                                val bytes = store.readBytes(e)
-                                if (bytes != null) {
-                                    onPlay(PlaySession(e.name, bytes, PlayerMode.HotSeat, null))
-                                } else status = "خواندن فایل ناموفق بود"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item { SectionTitle("بازی‌های داخلی", "دو نفره") }
-        items(twoPlayerGames, key = { it.id }) { g ->
-            GameRow(
-                game = g,
-                unlocked = true,
-                defaultTwoPlayer = true,
-                onPlay = { mode -> loadAndPlay(g, context, onPlay, { status = it }, mode) },
+            Text(
+                "نوستالژیک و دونفره — با یک خرید، خودکار وارد برنامه می‌شوند",
+                color = c.sub, fontSize = 12.sp,
             )
         }
 
         item {
             AppCard {
                 Column(Modifier.padding(14.dp)) {
-                    Text("راهنما", color = c.txt, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
                     Text(
-                        "برای تجربه‌ی بهتر، گوشی را افقی بگیر. هر بازیکن دسته‌ی لمسی خودش را " +
-                            "در نیمه‌ی پایین صفحه می‌بیند.",
+                        if (unlocked) "بسته فعال است — همه‌ی بازی‌ها باز است"
+                        else "برای باز شدن بازی‌ها، بسته‌ی پریمیوم را خریداری کن",
+                        color = if (unlocked) c.good else c.txt,
+                        fontSize = 13.5.sp, fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "زحمت افزودن ROM را از دوشت برمی‌داریم: بازی‌های پرطرفدار " +
+                            "دونفره (و تک‌نفره) از پیش در برنامه باندل شده‌اند و بعد از پرداخت " +
+                            "از طریق «$storeName» بلافاصله باز و قابل‌اجرا می‌شوند.",
                         color = c.sub, fontSize = 12.sp,
                     )
+                    if (!unlocked) {
+                        Spacer(Modifier.height(11.dp))
+                        PrimaryButton("خرید بسته‌ی پریمیوم", filled = true) { onUnlock() }
+                    }
                 }
             }
-            Spacer(Modifier.height(6.dp))
         }
+
+        item { InlineStatus(status) }
+
+        items(GameRegistry.premiumGames, key = { it.id }) { g ->
+            GameRow(
+                game = g,
+                unlocked = unlocked,
+                onPlay = { mode -> loadAndPlay(g, context, onPlay, { status = it }, mode) },
+                onUnlock = onUnlock,
+            )
+        }
+
+        if (unlocked) {
+            item {
+                AppCard {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("بازی‌ها کجاست؟", color = c.txt, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "همین بازی‌ها در تب «بازی‌های من» زیر بخش «پریمیوم شما» هم " +
+                                "نمایش داده می‌شوند تا همه‌ی بازی‌هایت یک‌جا باشند.",
+                            color = c.sub, fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+        }
+
+        item { Spacer(Modifier.height(8.dp)) }
     }
 }
 
-/* ===================== تب بازی من ===================== */
+/* ===================== تب بازی‌های من ===================== */
 
 @Composable
-private fun MyGamesTab(onPlay: (PlaySession) -> Unit) {
+private fun MyGamesTab(
+    unlocked: Boolean,
+    onPlay: (PlaySession) -> Unit,
+    onUnlock: () -> Unit,
+) {
     val c = LocalAppColors.current
     val context = LocalContext.current
     val store = remember { MyGamesStore(context) }
@@ -376,7 +390,7 @@ private fun MyGamesTab(onPlay: (PlaySession) -> Unit) {
             Spacer(Modifier.height(10.dp))
             Text("بازی‌های من", color = c.txt, fontSize = 25.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(3.dp))
-            Text("ROMهای خودت — روی گوشی ذخیره می‌شوند", color = c.sub, fontSize = 12.sp)
+            Text("ROMهای خودت + بازی‌های پریمیومی که خریدی", color = c.sub, fontSize = 12.sp)
         }
         item { InlineStatus(status) }
 
@@ -386,6 +400,27 @@ private fun MyGamesTab(onPlay: (PlaySession) -> Unit) {
             }
         }
 
+        // ── بخش پریمیوم: پس از خرید خودکار این‌جا باز می‌شود ─────────────
+        item { SectionTitle("پریمیوم شما", GameRegistry.premiumGames.size.toString()) }
+        items(GameRegistry.premiumGames, key = { "prem_${it.id}" }) { g ->
+            GameRow(
+                game = g,
+                unlocked = unlocked,
+                onPlay = { mode -> loadAndPlay(g, context, onPlay, { status = it }, mode) },
+                onUnlock = onUnlock,
+            )
+        }
+        if (!unlocked) {
+            item {
+                Text(
+                    "این بازی‌ها با خرید بسته‌ی پریمیوم باز می‌شوند.",
+                    color = c.sub, fontSize = 11.5.sp,
+                )
+            }
+        }
+
+        // ── ROMهای خودم ────────────────────────────────────────────────
+        item { SectionTitle("ROMهای خودم", games.size.toString()) }
         if (games.isEmpty()) {
             item {
                 AppCard {
@@ -411,7 +446,7 @@ private fun MyGamesTab(onPlay: (PlaySession) -> Unit) {
                                 },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                androidx.compose.material3.Icon(
+                                Icon(
                                     Icons.Filled.Delete, contentDescription = "حذف",
                                     tint = c.sub, modifier = Modifier.size(18.dp),
                                 )
@@ -485,51 +520,6 @@ private fun MyGamesTab(onPlay: (PlaySession) -> Unit) {
     }
 }
 
-/* ===================== تب بازی‌های رایگان ===================== */
-
-@Composable
-private fun FreeTab(onPlay: (PlaySession) -> Unit) {
-    val c = LocalAppColors.current
-    val context = LocalContext.current
-    var status by remember { mutableStateOf("") }
-
-    LazyColumn(
-        Modifier.fillMaxSize().padding(horizontal = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(11.dp),
-    ) {
-        item {
-            Spacer(Modifier.height(10.dp))
-            Text("بازی‌های رایگان", color = c.txt, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(3.dp))
-            Text("از پیش آماده و آفلاین · بدون نیاز به خرید", color = c.sub, fontSize = 12.sp)
-        }
-        item { InlineStatus(status) }
-
-        items(GameRegistry.freeGames(), key = { it.id }) { g ->
-            GameRow(
-                game = g,
-                unlocked = true,
-                onPlay = { mode -> loadAndPlay(g, context, onPlay, { status = it }, mode) },
-            )
-        }
-
-        item {
-            AppCard {
-                Column(Modifier.padding(14.dp)) {
-                    Text("درباره‌ی این بازی‌ها", color = c.txt, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "این‌ها بازی‌های آزاد و متن‌باز مگا درایو هستند و همراه برنامه توزیع می‌شوند. " +
-                            "حق نشر هر بازی کنار نامش ذکر شده است.",
-                        color = c.sub, fontSize = 12.sp,
-                    )
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-        }
-    }
-}
-
 /* ===================== تب حساب کاربری ===================== */
 
 @Composable
@@ -560,11 +550,11 @@ private fun AccountTab(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             Modifier.size(38.dp)
-                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .background(if (unlocked) c.good.copy(alpha = 0.16f) else c.warn.copy(alpha = 0.16f)),
                             contentAlignment = Alignment.Center,
                         ) {
-                            androidx.compose.material3.Icon(
+                            Icon(
                                 Icons.Filled.ShoppingCart,
                                 contentDescription = null,
                                 tint = if (unlocked) c.good else c.warn,
@@ -574,7 +564,7 @@ private fun AccountTab(
                         Spacer(Modifier.width(11.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                if (unlocked) "بسته‌ی کامل فعال است" else "بسته‌ی کامل خریداری نشده",
+                                if (unlocked) "بسته‌ی پریمیوم فعال است" else "بسته‌ی پریمیوم خریداری نشده",
                                 color = c.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                             )
                             Text(storeName, color = c.sub, fontSize = 11.5.sp)
@@ -582,7 +572,7 @@ private fun AccountTab(
                     }
                     Spacer(Modifier.height(11.dp))
                     if (!unlocked) {
-                        PrimaryButton("خرید بسته‌ی کامل بازی‌ها", filled = true) { onUnlockClick() }
+                        PrimaryButton("خرید بسته‌ی پریمیوم", filled = true) { onUnlockClick() }
                     } else {
                         Text(
                             "همه‌ی بازی‌ها باز است. اگر برنامه را حذف کنی و دوباره از همین فروشگاه " +
@@ -602,7 +592,7 @@ private fun AccountTab(
                     Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    androidx.compose.material3.Icon(
+                    Icon(
                         Icons.Filled.Settings, contentDescription = null,
                         tint = c.sub, modifier = Modifier.size(19.dp),
                     )
@@ -631,7 +621,7 @@ private fun AccountTab(
             Spacer(Modifier.height(9.dp))
             AppCard {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    InfoLine("نسخه", "۰.۴.۰")
+                    InfoLine("نسخه", "۰.۵.۰")
                     InfoLine("هسته", "Genesis Plus GX")
                     InfoLine("پرداخت", "بازار / مایکت")
                     InfoLine("مجوز هسته", "غیرتجاری — جزئیات در NOTICE.md")
@@ -666,9 +656,9 @@ private fun queryName(context: android.content.Context, uri: Uri): String = try 
     } ?: "rom.bin"
 } catch (_: Exception) { "rom.bin" }
 
-/** ROM بازی داخلی را می‌خواند (asset یا دانلود) و نشست بازی می‌سازد. */
+/** ROM یک بازی پریمیوم را می‌خواند (asset یا دانلود) و نشست بازی می‌سازد. */
 fun loadAndPlay(
-    g: ir.segasim.catalog.Game,
+    g: Game,
     context: android.content.Context,
     onPlay: (PlaySession) -> Unit,
     statusUpdater: (String) -> Unit,

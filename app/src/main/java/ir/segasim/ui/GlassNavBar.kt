@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Star
@@ -41,14 +40,14 @@ import androidx.compose.ui.unit.sp
 import ir.segasim.ui.theme.LocalAppColors
 
 /**
- * تب‌های نوار ناوبری پایین. چون کل برنامه راست‌به‌چپ است، «خانه» در
- * سمت راست قرار می‌گیرد (مثل تلگرام فارسی).
+ * تب‌های نوار ناوبری پایین. چون کل برنامه راست‌به‌چپ است و Tab.entries به
+ * ترتیب پیمایش می‌شود، «خانه» در سمت راست قرار می‌گیرد (مثل تلگرام فارسی).
+ * ترتیب خوانده‌شده از راست به چپ: خانه، بازی‌های من، پریمیوم، حساب.
  */
 enum class Tab(val label: String, val icon: ImageVector) {
     Home("خانه", Icons.Filled.Home),
-    Duo("دونفره", Icons.Filled.Face),
-    Mine("بازی من", Icons.Filled.List),
-    Free("رایگان", Icons.Filled.Star),
+    Mine("بازی‌های من", Icons.Filled.List),
+    Premium("پریمیوم", Icons.Filled.Star),
     Account("حساب", Icons.Filled.AccountCircle),
 }
 
@@ -58,7 +57,6 @@ enum class Tab(val label: String, val icon: ImageVector) {
  *  • پس‌زمینه‌ی نیمه‌شفاف با گرادیان ملایم (حس شیشه/بلور)
  *  • خط مویی روشن روی لبه‌ها + سایه‌ی نرم
  *  • خانه‌ی فعال با قرص رنگی ملایم و متن بولد
- * محتوای صفحه از پشت آن عبور می‌کند (تب‌ها padding پایین دارند).
  */
 @Composable
 fun GlassNavBar(

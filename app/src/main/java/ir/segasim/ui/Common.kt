@@ -16,13 +16,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.setValue
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -174,7 +175,8 @@ private fun MiniChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * ردیف بازی — برای کاتالوگ‌ها. بازی قفل با دکمه‌ی خرید نمایش داده می‌شود.
+ * ردیف یک بازی پریمیوم. اگر کاربر بسته را خریده باشد دکمه‌ی «شروع» و
+ * در غیر این صورت دکمه‌ی «باز کن با خرید» نمایش داده می‌شود.
  */
 @Composable
 fun GameRow(
@@ -186,7 +188,7 @@ fun GameRow(
 ) {
     val c = LocalAppColors.current
     var twoPlayer by remember(game.id) { androidx.compose.runtime.mutableStateOf(defaultTwoPlayer) }
-    val playable = game.isFree || unlocked
+    val playable = unlocked
 
     AppCard {
         Column(Modifier.padding(14.dp)) {
@@ -199,8 +201,7 @@ fun GameRow(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (playable) androidx.compose.material.icons.Icons.Filled.PlayArrow
-                        else androidx.compose.material.icons.Icons.Filled.Lock,
+                        imageVector = if (playable) Icons.Filled.PlayArrow else Icons.Filled.Lock,
                         contentDescription = null,
                         tint = if (playable) c.accent else c.sub,
                         modifier = Modifier.size(20.dp),
