@@ -4,13 +4,13 @@ import android.graphics.Bitmap
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,8 +42,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -57,7 +59,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ir.segasim.catalog.PlayerMode
 import ir.segasim.emu.EmulatorEngine
-import ir.segasim.ui.theme.AppColors
 import ir.segasim.ui.theme.LocalAppColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -66,11 +67,6 @@ import java.nio.ShortBuffer
 /* ------------------------------------------------------------------ *
  * بیت‌های ورودی — دقیقاً بر اساس ایندکس‌های استاندارد libretro         *
  * (RETRO_DEVICE_ID_JOYPAD_*).                                          *
- *                                                                     *
- * باگ نسخه‌ی قبل: این اعداد با «بیت‌های خام جنسیس» یکی گرفته شده بود  *
- * (UP=0x1، B=0x10 …) در حالی که هسته‌ی Genesis Plus GX بیتِ n را به    *
- * عنوان RETRO_DEVICE_ID_JOYPAD_n می‌خواند. نتیجه: دی‌پد روی دکمه‌های    *
- * B/C/A می‌افتاد و کل دسته جابه‌جا/برعکس کار می‌کرد.                  *
  *                                                                     *
  * نقشه‌ی واقعی هسته (از جدول retro_input_descriptor در libretro.c):   *
  *   RETRO B(0) → B سگا   |  RETRO Y(1) → A سگا                       *
@@ -90,10 +86,15 @@ private const val BIT_Y = 1 shl 9        // 0x0200 — Y سگا (ردیف بال
 private const val BIT_X = 1 shl 10       // 0x0400 — X سگا
 private const val BIT_Z = 1 shl 11       // 0x0800 — Z سگا
 
+/** جهت‌های مورب D-pad: هر ناحیه هر دو بیت را با هم می‌فرستد. */
+private const val BIT_UP_LEFT = BIT_UP or BIT_LEFT
+private const val BIT_UP_RIGHT = BIT_UP or BIT_RIGHT
+private const val BIT_DOWN_LEFT = BIT_DOWN or BIT_LEFT
+private const val BIT_DOWN_RIGHT = BIT_DOWN or BIT_RIGHT
+
 /**
  * صفحه‌ی اجرای بازی: ویدیو (RGB565) در بالا، دسته‌ی لمسی ۶ دکمه‌ای
- * (چیدمان سگا ستورن) در پایین. در حالت دونفره، بالای صفحه دسته‌ی
- * بازیکن ۲ و پایین دسته‌ی بازیکن ۱ است — هر دو با همان چیدمان.
+ * (چیدمان سگا ستورن) در پایین.
  */
 @Composable
 fun EmulatorScreen(session: PlaySession, onExit: () -> Unit) {
@@ -242,11 +243,9 @@ private fun ExitChip(onExit: () -> Unit) {
 }
 
 /**
- * دسته‌ی لمسی ۶ دکمه‌ای به سبک سگا ستورن (مطابق تصویری که کاربر فرستاد):
- *  • چپ : یک صفحه‌ی گرد با دی‌پد (+) و فلش‌های ▲ ◀ ▶ ▼
- *  • راست: شش دکمه‌ی گرد در دو ردیفِ کج‌شده —
- *          ردیف پایین A B C (A پایین‌ترین، C بالاتر)
- *          ردیف بالا  X Y Z (X پایین‌ترین، Z بالاترین)
+ * دسته‌ی لمسی ۶ دکمه‌ای به سبک سگا ستورن:
+ *  • چپ : صفحه‌ی گرد با دی‌پد ۸ جهته
+ *  • راست: شش دکمه‌ی گرد در دو ردیفِ کج‌شده (پایین A B C، بالا X Y Z)
  *  • وسطِ پایین: دکمه‌ی بیضی START
  *
  * چیدمان داخل دسته با LayoutDirection.Ltr قفل شده تا در برنامه‌ی
@@ -296,7 +295,16 @@ fun SegaPad(
     }
 }
 
-/** صفحه‌ی گرد دی‌پد با بازوهای صلیبی و چهار فلش. */
+/**
+ * دی‌پد ۸ جهته روی یک صفحه‌ی گرد (سبک دسته‌ی شش‌دکمه‌ای).
+ *
+ * چهار ناحیه‌ی مورب گوشه‌ها — همان جاهایی که در تصویر کاربر با دایره‌ی
+ * قرمز مشخص شده بودند — هرکدام جهت مورب خودشان را می‌فرستند
+ * (بالا‑چپ، بالا‑راست، پایین‑چپ، پایین‑راست) و فلشِ مثلثی هم رو به بیرون
+ * همان گوشه اشاره می‌کند. چهار ناحیه‌ی میانی بازوها، جهت‌های اصلی
+ * (بالا/پایین/چپ/راست) را می‌دهند؛ چون همه‌ی بیت‌های فعال OR می‌شوند،
+ * ترکیب‌ها به‌طور طبیعی ۸ جهته کار می‌کنند.
+ */
 @Composable
 private fun SegaDPad(
     held: MutableMap<Int, Boolean>,
@@ -305,6 +313,9 @@ private fun SegaDPad(
 ) {
     val c = LocalAppColors.current
     val d = key * 3.3f
+    val corner = key * 1.12f
+    val mid = key * 0.98f
+
     Box(Modifier.size(d), contentAlignment = Alignment.Center) {
         // صفحه‌ی گرد
         Box(
@@ -324,12 +335,123 @@ private fun SegaDPad(
                 .background(Brush.verticalGradient(listOf(c.card, c.bg)))
         )
         // مرکز
-        Box(Modifier.size(key * 0.46f).clip(CircleShape).background(c.bg.copy(alpha = 0.9f)))
-        // چهار جهت
-        PadKey("▲", BIT_UP, held, onBits, Modifier.align(Alignment.TopCenter).size(key), flat = true)
-        PadKey("▼", BIT_DOWN, held, onBits, Modifier.align(Alignment.BottomCenter).size(key), flat = true)
-        PadKey("◀", BIT_LEFT, held, onBits, Modifier.align(Alignment.CenterStart).size(key), flat = true)
-        PadKey("▶", BIT_RIGHT, held, onBits, Modifier.align(Alignment.CenterEnd).size(key), flat = true)
+        Box(Modifier.size(key * 0.42f).clip(CircleShape).background(c.bg.copy(alpha = 0.9f)))
+
+        // ── چهار جهت اصلی، روی بازوها ─────────────────────────
+        DirKey(
+            bits = BIT_UP, held = held, onBits = onBits,
+            arrow = Arrow.Up, active = c.accent,
+            modifier = Modifier.align(Alignment.TopCenter).size(key, mid),
+        )
+        DirKey(
+            bits = BIT_DOWN, held = held, onBits = onBits,
+            arrow = Arrow.Down, active = c.accent,
+            modifier = Modifier.align(Alignment.BottomCenter).size(key, mid),
+        )
+        DirKey(
+            bits = BIT_LEFT, held = held, onBits = onBits,
+            arrow = Arrow.Left, active = c.accent,
+            modifier = Modifier.align(Alignment.CenterStart).size(mid, key),
+        )
+        DirKey(
+            bits = BIT_RIGHT, held = held, onBits = onBits,
+            arrow = Arrow.Right, active = c.accent,
+            modifier = Modifier.align(Alignment.CenterEnd).size(mid, key),
+        )
+
+        // ── چهار ناحیه‌ی مورب، در گوشه‌های صفحه ───────────────
+        DirKey(
+            bits = BIT_UP_LEFT, held = held, onBits = onBits,
+            arrow = Arrow.UpLeft, active = c.accent,
+            modifier = Modifier.align(Alignment.TopStart).size(corner, corner),
+        )
+        DirKey(
+            bits = BIT_UP_RIGHT, held = held, onBits = onBits,
+            arrow = Arrow.UpRight, active = c.accent,
+            modifier = Modifier.align(Alignment.TopEnd).size(corner, corner),
+        )
+        DirKey(
+            bits = BIT_DOWN_LEFT, held = held, onBits = onBits,
+            arrow = Arrow.DownLeft, active = c.accent,
+            modifier = Modifier.align(Alignment.BottomStart).size(corner, corner),
+        )
+        DirKey(
+            bits = BIT_DOWN_RIGHT, held = held, onBits = onBits,
+            arrow = Arrow.DownRight, active = c.accent,
+            modifier = Modifier.align(Alignment.BottomEnd).size(corner, corner),
+        )
+    }
+}
+
+/** جهتِ فلشِ ناحیه‌ها. */
+private enum class Arrow { Up, Down, Left, Right, UpLeft, UpRight, DownLeft, DownRight }
+
+/**
+ * یک ناحیه‌ی جهت روی دی‌پد: با نگه‌داشتن انگشت، بیت‌های آن ناحیه روشن
+ * می‌مانند و مثلثِ آن به سمت بیرونِ دی‌پد اشاره می‌کند.
+ */
+@Composable
+private fun DirKey(
+    bits: Int,
+    held: MutableMap<Int, Boolean>,
+    onBits: (Int) -> Unit,
+    arrow: Arrow,
+    active: Color,
+    modifier: Modifier,
+) {
+    val c = LocalAppColors.current
+    var pressed by remember { mutableStateOf(false) }
+
+    Box(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .pointerInput(bits) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    pressed = true
+                    held[bits] = true
+                    onBits(computeBits(held))
+                    waitForUpOrCancellation()
+                    pressed = false
+                    held.remove(bits)
+                    onBits(computeBits(held))
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize().padding(4.dp)) {
+            val w = size.width
+            val h = size.height
+            val path = Path()
+            when (arrow) {
+                Arrow.Up -> {
+                    path.moveTo(w / 2f, 0f); path.lineTo(w, h); path.lineTo(0f, h)
+                }
+                Arrow.Down -> {
+                    path.moveTo(w / 2f, h); path.lineTo(0f, 0f); path.lineTo(w, 0f)
+                }
+                Arrow.Left -> {
+                    path.moveTo(0f, h / 2f); path.lineTo(w, 0f); path.lineTo(w, h)
+                }
+                Arrow.Right -> {
+                    path.moveTo(w, h / 2f); path.lineTo(0f, 0f); path.lineTo(0f, h)
+                }
+                Arrow.UpLeft -> {
+                    path.moveTo(0f, 0f); path.lineTo(w, 0f); path.lineTo(0f, h)
+                }
+                Arrow.UpRight -> {
+                    path.moveTo(w, 0f); path.lineTo(0f, 0f); path.lineTo(w, h)
+                }
+                Arrow.DownLeft -> {
+                    path.moveTo(0f, h); path.lineTo(w, h); path.lineTo(0f, 0f)
+                }
+                Arrow.DownRight -> {
+                    path.moveTo(w, h); path.lineTo(0f, h); path.lineTo(w, 0f)
+                }
+            }
+            path.close()
+            drawPath(path, color = if (pressed) active else c.sub.copy(alpha = 0.62f))
+        }
     }
 }
 
@@ -378,17 +500,7 @@ private fun StartKey(
 
 private fun computeBits(held: Map<Int, Boolean>): Int {
     var b = 0
-    if (held[BIT_UP] == true) b = b or BIT_UP
-    if (held[BIT_DOWN] == true) b = b or BIT_DOWN
-    if (held[BIT_LEFT] == true) b = b or BIT_LEFT
-    if (held[BIT_RIGHT] == true) b = b or BIT_RIGHT
-    if (held[BIT_A] == true) b = b or BIT_A
-    if (held[BIT_B] == true) b = b or BIT_B
-    if (held[BIT_C] == true) b = b or BIT_C
-    if (held[BIT_X] == true) b = b or BIT_X
-    if (held[BIT_Y] == true) b = b or BIT_Y
-    if (held[BIT_Z] == true) b = b or BIT_Z
-    if (held[BIT_START] == true) b = b or BIT_START
+    for (k in held.keys) if (held[k] == true) b = b or k
     return b
 }
 
@@ -403,7 +515,6 @@ private fun PadKey(
     held: MutableMap<Int, Boolean>,
     onBits: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    flat: Boolean = false,
     pill: Boolean = false,
 ) {
     val c = LocalAppColors.current
@@ -413,18 +524,11 @@ private fun PadKey(
     Box(
         modifier
             .clip(shape)
-            .then(
-                if (!flat) {
-                    Modifier.background(
-                        if (pressed) Brush.verticalGradient(listOf(c.accent, c.accent.copy(alpha = 0.82f)))
-                        else Brush.verticalGradient(listOf(c.cardAlt, c.card))
-                    ).border(1.dp, if (pressed) c.accent else c.line, shape)
-                } else Modifier
+            .background(
+                if (pressed) Brush.verticalGradient(listOf(c.accent, c.accent.copy(alpha = 0.82f)))
+                else Brush.verticalGradient(listOf(c.cardAlt, c.card))
             )
-            .then(
-                if (flat && pressed) Modifier.background(c.accent.copy(alpha = 0.55f), shape)
-                else Modifier
-            )
+            .border(1.dp, if (pressed) c.accent else c.line, shape)
             .pointerInput(key) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
@@ -433,7 +537,7 @@ private fun PadKey(
                     onBits(computeBits(held))
                     waitForUpOrCancellation()
                     pressed = false
-                    held[key] = false
+                    held.remove(key)
                     onBits(computeBits(held))
                 }
             },
@@ -441,7 +545,7 @@ private fun PadKey(
     ) {
         Text(
             label,
-            color = if (pressed) (if (flat) c.txt else c.accentOn) else (if (flat) c.sub else c.txt),
+            color = if (pressed) c.accentOn else c.txt,
             fontSize = if (pill) 10.sp else if (key >= 40) 15.sp else 12.sp,
             fontWeight = if (pill) FontWeight.Bold else FontWeight.Medium,
         )

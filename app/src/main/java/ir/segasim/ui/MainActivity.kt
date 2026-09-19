@@ -83,7 +83,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
 fun AppRoot() {
     val context = LocalContext.current
     var dark by remember { mutableStateOf(SettingsStore(context).isDark()) }
-    var splash by remember { mutableStateOf(true) }
     var tab by remember { mutableStateOf(Tab.Home) }
     var playing by remember { mutableStateOf<PlaySession?>(null) }
 
@@ -107,65 +106,61 @@ fun AppRoot() {
         // کل برنامه راست‌به‌رچپ — «خانه»ی اول در سمت راست نوار ناوبری
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
             val c = LocalAppColors.current
-            if (splash) {
-                SegaLakSplash(onDone = { splash = false })
+            val session = playing
+            if (session != null) {
+                EmulatorScreen(
+                    session = session,
+                    onExit = {
+                        playing = null
+                        billingRefresh(billing)
+                    },
+                )
             } else {
-                val session = playing
-                if (session != null) {
-                    EmulatorScreen(
-                        session = session,
-                        onExit = {
-                            playing = null
-                            billingRefresh(billing)
-                        },
-                    )
-                } else {
-                    Box(Modifier.fillMaxSize().background(c.bg)) {
-                        Column(
-                            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
-                        ) {
-                            Box(Modifier.weight(1f)) {
-                                when (tab) {
-                                    Tab.Home -> HomeTab(
-                                        unlocked = unlocked,
-                                        storeName = billing.providerDisplayName(),
-                                        onGoTab = { tab = it },
-                                    )
-                                    Tab.Mine -> MyGamesTab(
-                                        unlocked = unlocked,
-                                        onPlay = { playing = it },
-                                        onUnlock = {
-                                            (context as? Activity)?.let { billing.launchPurchase(it) }
-                                        },
-                                    )
-                                    Tab.Premium -> PremiumTab(
-                                        unlocked = unlocked,
-                                        storeName = billing.providerDisplayName(),
-                                        onPlay = { playing = it },
-                                        onUnlock = {
-                                            (context as? Activity)?.let { billing.launchPurchase(it) }
-                                        },
-                                    )
-                                    Tab.Account -> AccountTab(
-                                        unlocked = unlocked,
-                                        storeName = billing.providerDisplayName(),
-                                        dark = dark,
-                                        onToggleDark = {
-                                            dark = it
-                                            SettingsStore(context).setDark(it)
-                                        },
-                                        onUnlockClick = {
-                                            (context as? Activity)?.let { billing.launchPurchase(it) }
-                                        },
-                                    )
-                                }
+                Box(Modifier.fillMaxSize().background(c.bg)) {
+                    Column(
+                        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
+                    ) {
+                        Box(Modifier.weight(1f)) {
+                            when (tab) {
+                                Tab.Home -> HomeTab(
+                                    unlocked = unlocked,
+                                    storeName = billing.providerDisplayName(),
+                                    onGoTab = { tab = it },
+                                )
+                                Tab.Mine -> MyGamesTab(
+                                    unlocked = unlocked,
+                                    onPlay = { playing = it },
+                                    onUnlock = {
+                                        (context as? Activity)?.let { billing.launchPurchase(it) }
+                                    },
+                                )
+                                Tab.Premium -> PremiumTab(
+                                    unlocked = unlocked,
+                                    storeName = billing.providerDisplayName(),
+                                    onPlay = { playing = it },
+                                    onUnlock = {
+                                        (context as? Activity)?.let { billing.launchPurchase(it) }
+                                    },
+                                )
+                                Tab.Account -> AccountTab(
+                                    unlocked = unlocked,
+                                    storeName = billing.providerDisplayName(),
+                                    dark = dark,
+                                    onToggleDark = {
+                                        dark = it
+                                        SettingsStore(context).setDark(it)
+                                    },
+                                    onUnlockClick = {
+                                        (context as? Activity)?.let { billing.launchPurchase(it) }
+                                    },
+                                )
                             }
-                            GlassNavBar(
-                                selected = tab,
-                                tabs = tabs,
-                                onSelect = { tab = it },
-                            )
                         }
+                        GlassNavBar(
+                            selected = tab,
+                            tabs = tabs,
+                            onSelect = { tab = it },
+                        )
                     }
                 }
             }
@@ -198,13 +193,17 @@ private fun HomeTab(
     ) {
         item {
             Spacer(Modifier.height(10.dp))
-            Column {
-                Text("سگالاک", color = c.txt, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    "مگا درایو · مستر سیستم · گیم گیر · سگا سی‌دی",
-                    color = c.sub, fontSize = 12.sp,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SegaLakMark(size = 46.dp)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("سگالاک", color = c.txt, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "مگا درایو · مستر سیستم · گیم گیر · سگا سی‌دی",
+                        color = c.sub, fontSize = 11.5.sp,
+                    )
+                }
             }
         }
 
@@ -247,9 +246,9 @@ private fun HomeTab(
             Spacer(Modifier.height(9.dp))
             AppCard {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Tip("۱", "جمله‌بازی‌های پریمیوم از پیش آماده‌اند؛ کافی است بسته را یک‌بار بخری — نیازی به افزودن ROM نیست.")
+                    Tip("۱", "بازی‌های پریمیوم از پیش آماده‌اند؛ کافی است بسته را یک‌بار بخری — نیازی به افزودن ROM نیست.")
                     Tip("۲", "پس از خرید، بازی‌ها در تب «بازی‌های من» زیر بخش پریمیوم باز می‌شوند و تب پریمیوم از نوار پایین حذف می‌شود.")
-                    Tip("۳", "ROMهای خودت را از «بازی‌های من» اضافه کن؛ دسته‌ی لمسی سگا (۶ دکمه) روی همه‌ی بازی‌ها کار می‌کند.")
+                    Tip("۳", "دسته‌ی لمسی ۶ دکمه‌ای با دی‌پد ۸ جهته (چهار جهت اصلی + چهار جهت مورب) روی همه‌ی بازی‌ها کار می‌کند.")
                     Tip("۴", "خرید از بازار یا مایکت انجام می‌شود؛ پس از حذف و نصب مجدد، خرید خودکار برمی‌گردد.")
                 }
             }
@@ -653,9 +652,10 @@ private fun AccountTab(
             Spacer(Modifier.height(9.dp))
             AppCard {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    InfoLine("نسخه", "۰.۶.۰")
+                    InfoLine("نسخه", "۰.۷.۰")
                     InfoLine("هسته", "Genesis Plus GX")
-                    InfoLine("دسته", "۶ دکمه — سبک سگا ستورن")
+                    InfoLine("دسته", "۶ دکمه + دی‌پد ۸ جهته")
+                    InfoLine("اسپلش", "ویدیوی اختصاصی برنامه")
                     InfoLine("پرداخت", "بازار / مایکت")
                     InfoLine("مجوز هسته", "غیرتجاری — جزئیات در NOTICE.md")
                 }
